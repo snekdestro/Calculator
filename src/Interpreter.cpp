@@ -1,9 +1,64 @@
 #include "Interpreter.h"
-#include <algorithm> 
 #include <cctype>
 #include <string>
 #include <iostream>
+#include <algorithm>
 #include <stdexcept>
+
+
+#include <unordered_map>
+
+
+
+
+int getPrecedence(const Operation& op) {
+    // std::visit automatically figures out whether it's looking at 
+    // a BinaryOperation or a UnaryOperation and accesses .precedence
+    return std::visit([](const auto& o) { return o.priority; }, op);
+}
+struct UnaryMapping {
+    std::string name;
+    char code;
+};
+
+const std::vector<UnaryMapping> UnaryFunctions = {
+    {"sin", SIN},
+    {"cos",  COS},
+    {"tan",  TAN},
+    {"asin", ASIN},
+    {"acos", ACOS},
+    {"atan", ATAN},
+    {"log", LOG10},
+    {"ln", LN}
+};
+const std::unordered_map<char, Operation> operationMap = {
+    {'+', BinaryOperation{'+', add,   ADDITIVE}},
+    {'*', BinaryOperation{'*', mult,  MULTIPLICATIVE}},
+    {'/', BinaryOperation{'/', div, MULTIPLICATIVE}}, 
+    {'%', BinaryOperation{'%', mod,   MULTIPLICATIVE}},
+    {'^', BinaryOperation{'^', power, EXPONENTIAL}},
+    {'(', BinaryOperation{'(', dummy, LEFT}},
+    {')', BinaryOperation{')', dummy, RIGHT}},
+    {SIN, UnaryOperation{SIN, std::sin, UNARYMATHFUNCTION}},
+    {COS, UnaryOperation{COS, std::cos, UNARYMATHFUNCTION}},
+    {TAN, UnaryOperation{TAN, std::tan, UNARYMATHFUNCTION}},
+    {ASIN, UnaryOperation{ASIN, std::asin, UNARYMATHFUNCTION}},
+    {ACOS, UnaryOperation{ACOS, std::acos, UNARYMATHFUNCTION}},
+    {ATAN, UnaryOperation{ATAN, std::atan, UNARYMATHFUNCTION}},
+    {LOG10, UnaryOperation{LOG10,std::log10, UNARYMATHFUNCTION}},
+    {LN, UnaryOperation{LN, std::log, UNARYMATHFUNCTION}}
+};
+void replaceAll(std::string& str, const std::string& from, const std::string& to) {
+    if (from.empty()) return;
+    
+    size_t start_pos = 0;
+    while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
+        str.replace(start_pos, from.length(), to);
+        // Advance past the newly replaced chunk to avoid infinite loops
+        start_pos += to.length(); 
+    }
+}
+
 double add(double a, double b){
     return a + b;
 }
@@ -25,15 +80,18 @@ double power(double a, double b){
 double dummy(double a, double b){
     return -1; //shouldn't be here dumbass
 }
-
-std::string fixup(std::string expression){
+//lexers are for fucking nerds; lets just fucking walk through the string till we find the shit we need. 
+//With good maps and shit, this stuff is easy to extend!
+std::string fixup(std::string& expression){
     expression.erase(std::remove(expression.begin(), expression.end(), ' '), expression.end()); //cull spaces for formatting
+    for (const auto& Unary : UnaryFunctions) {
+        replaceAll(expression, Unary.name, std::string(1, Unary.code));
+    }
     if (expression.length() <= 1) {
         return expression;
     }
     std::string ret = "";
     ret += expression.at(0);
-    //lets pretend functions like sin(x) don't exist yet :)
     for(int i = 1; i < expression.length(); i++){
         char working = expression.at(i);
 
@@ -63,7 +121,6 @@ std::string fixup(std::string expression){
                 }
             }
         }else if(std::isalpha(working)){
-            //functions will be a bitch to handle, lets pretend they don't exist yet
             if(std::isalnum(expression.at(i - 1))){
                 ret += '*';
             }
@@ -77,25 +134,23 @@ std::string fixup(std::string expression){
             ret += working;
         }
     }
-    std::cout << ret << std::endl;
     return ret;
 }
 
-bool isOp(char c){
-    return (c == '+' || c == '%' || c == '-' || c == '/' || c == '*' || c == '^');
-}
 void checkStack(std::vector<Token>& tokens, std::stack<Operation>& stack, Operation o){
+    
     if(stack.empty()){
         stack.push(o);
         return;
     }
-    if(o.priority == LEFT){
+    
+    if(getPrecedence(o) == LEFT){
         stack.push(o);
         return;
     }
-    if(o.priority == RIGHT){
+    if(getPrecedence(o) == RIGHT){
         while(!stack.empty()){
-            if(stack.top().priority == LEFT){
+            if(getPrecedence(stack.top()) == LEFT){
 
                 stack.pop();
                 break;
@@ -106,9 +161,9 @@ void checkStack(std::vector<Token>& tokens, std::stack<Operation>& stack, Operat
         return;
     }
 
-    if(o.priority < stack.top().priority){
+    if(getPrecedence(o) < getPrecedence(stack.top())){
         while(!stack.empty()){
-            if(o.priority > stack.top().priority){
+            if(getPrecedence(o) > getPrecedence(stack.top())){
                 break;
             }
             tokens.push_back(stack.top());
@@ -116,7 +171,6 @@ void checkStack(std::vector<Token>& tokens, std::stack<Operation>& stack, Operat
         }
     }
     stack.push(o);
-    //std::cout << stack.top().symbol << std::endl;
 
 
 
@@ -128,16 +182,14 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
     int offset = 1;
     if(expression.at(0) == '-'){
         for(; offset < expression.length(); offset++){
-            //std::cout << offset << std::endl;
             if(!(std::isdigit(expression.at(offset) | (expression.at(offset) != '.')))){
                 break;
             }
         }
-        //std::cout << expression.substr(0,offset);
         tokens.push_back(std::stod(expression.substr(0,offset)));
    
     }else if(expression.at(0) == '('){
-        checkStack(tokens,stack,Operation{'(', dummy, LEFT});
+        checkStack(tokens,stack,BinaryOperation{'(', dummy, LEFT});
     }
     else{
         offset = 0;
@@ -151,7 +203,7 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
             if(!std::isalnum(expression.at(i -1))){
                 int j = i + 1;
                 for(;j < expression.length(); j++){
-                    if(!std::isdigit(expression.at(j))){
+                    if(!std::isdigit(expression.at(j)) & (expression.at(j) != '.')){
                         break;
                     }
                 }
@@ -162,38 +214,17 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
                 
             }else{
                 //subtract!
-                checkStack(tokens,stack, Operation{'-', sub,ADDITIVE});
+                checkStack(tokens,stack, BinaryOperation{'-', sub,ADDITIVE});
                 
             }
-        }
-        else if(working == '+'){
-            checkStack(tokens, stack, Operation{'+',add,ADDITIVE});
-        }
-        else if(working == '*'){
-            checkStack(tokens,stack, Operation{'*',mult, MULTIPLICATIVE});
-        }
-        else if(working == '/'){
-            checkStack(tokens,stack, Operation{'/', div,MULTIPLICATIVE});
-        }
-        else if(working == '%'){
-            checkStack(tokens,stack, Operation{'%',mod, MULTIPLICATIVE});
-        }
-        else if(working == '^'){
-            checkStack(tokens,stack, Operation{'^', power, EXPONENTIAL});
-        }else if(working == '('){
-            checkStack(tokens,stack,Operation{'(', dummy, LEFT});
-        }
-        else if(working == ')'){
-            checkStack(tokens,stack,Operation{')', dummy, RIGHT});
-        }
-        else if(std::isalpha(working)){ //assumbed variable! (1 CHAR)
+        }else if(std::isalpha(working)){ //assumbed variable! (1 CHAR)
             tokens.push_back(Variable{working});
         }else if(std::isdigit(working)){
             int j = i+1;
             for(; j < expression.length(); j++){
                 
 
-                    if(!std::isdigit(expression.at(j))){
+                    if(!std::isdigit(expression.at(j)) & (expression.at(j) != '.')){
                         break;
                     }
            
@@ -203,7 +234,14 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
             i = (j); //don't laugh;
             continue;
 
+        }else{
+            auto it = operationMap.find(working);
+            if (it != operationMap.end()) {
+                checkStack(tokens, stack, it->second);
+            }
+            
         }
+
         i++;
 
     }
@@ -224,13 +262,24 @@ double evaluatePostFix(const std::vector<Token>& tokens){
         if(std::holds_alternative<double>(tokens.at(i))){
             nums.push(std::get<double>(tokens.at(i)));
         }else if(std::holds_alternative<Operation>(tokens.at(i))){
-            double p1 = nums.top(); nums.pop();
-            double p2 = nums.top(); nums.pop();
             Operation o = std::get<Operation>(tokens.at(i));
-            std::printf("%f %c %f\n", p2,o.symbol,p1);
-            nums.push(o.func(p2,p1));
+            if(std::holds_alternative<BinaryOperation>(o)){
+                BinaryOperation binary = std::get<BinaryOperation>(o);
+                double p1 = nums.top(); nums.pop();
+                double p2 = nums.top(); nums.pop();
+                
+                nums.push(binary.func(p2,p1));
+
+            }else if (std::holds_alternative<UnaryOperation>(o)){
+                UnaryOperation unary = std::get<UnaryOperation>(o);
+                double p1 = nums.top(); nums.pop();
+                nums.push(unary.func(p1));
+
+
+            }
+  
         }else{
-            throw std::invalid_argument("Variable expression where const is expected");
+            throw std::invalid_argument("Variable expression where constants are expected");
         }
     }
     return nums.top();
