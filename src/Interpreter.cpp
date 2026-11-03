@@ -4,16 +4,16 @@
 #include <iostream>
 #include <algorithm>
 #include <stdexcept>
-
-
 #include <unordered_map>
+
+
 
 
 
 
 int getPrecedence(const Operation& op) {
     // std::visit automatically figures out whether it's looking at 
-    // a BinaryOperation or a UnaryOperation and accesses .precedence
+    // a BinaryOperation or a UnaryOperation and accesses .priority
     return std::visit([](const auto& o) { return o.priority; }, op);
 }
 struct UnaryMapping {
@@ -283,9 +283,39 @@ double evaluatePostFix(const std::vector<Token>& tokens){
         }
     }
     return nums.top();
+}
+double evaluatePostFix(const std::vector<Token>& tokens, const std::unordered_map<char, double>& variables){
+        std::stack<double> nums;
+    for(int i = 0; i < tokens.size(); i++){
+        if(std::holds_alternative<double>(tokens.at(i))){
+            nums.push(std::get<double>(tokens.at(i)));
+        }else if(std::holds_alternative<Operation>(tokens.at(i))){
+            Operation o = std::get<Operation>(tokens.at(i));
+            if(std::holds_alternative<BinaryOperation>(o)){
+                BinaryOperation binary = std::get<BinaryOperation>(o);
+                double p1 = nums.top(); nums.pop();
+                double p2 = nums.top(); nums.pop();
+                
+                nums.push(binary.func(p2,p1));
+
+            }else if (std::holds_alternative<UnaryOperation>(o)){
+                UnaryOperation unary = std::get<UnaryOperation>(o);
+                double p1 = nums.top(); nums.pop();
+                nums.push(unary.func(p1));
 
 
-
+            }
+  
+        }else if(std::holds_alternative<Variable>(tokens.at(i))){
+            auto boundValue = variables.find(std::get<Variable>(tokens.at(i)).name);
+            if(boundValue == variables.end()){
+                throw std::invalid_argument("Unknown variable in expression");
+            }
+            nums.push(boundValue->second);
+        
+        }
+    }
+    return nums.top();
 }
 
 double evaluate(std::string& expression){

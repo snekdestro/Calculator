@@ -7,6 +7,8 @@
 #include <cmath>
 #include <variant>
 #include <stdexcept>
+#include <unordered_map>
+
 
 double add(double a, double b);
 double sub(double a, double b);
@@ -59,7 +61,7 @@ double evaluate(std::string& expression);
 std::string fixup(std::string& expression);
 void getPostFix(std::string& expression, std::vector<Token>& tokens);
 double evaluatePostFix(const std::vector<Token>& tokens);
-//TODO: evaluate with subs for variables!!
+double evaluatePostFix(const std::vector<Token>& tokens, const std::unordered_map<char, double>& variables);
 
 
 
