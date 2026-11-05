@@ -5,10 +5,33 @@
 #include <algorithm>
 #include <stdexcept>
 #include <unordered_map>
+#include <stack>
+#include <cmath>
 
 
 
+enum FunctionChar{
+    SIN = '\x01',
+    COS = '\x02',
+    TAN = '\x03',
+    ASIN = '\x04',
+    ACOS = '\x05',
+    ATAN = '\x06',
+    LOG10 = '\x07',
+    LN = '\x08',
+    ABS = '\x09',
+    SQRT = '\x0A',
+    ENDUNARY
+};
 
+enum Priorities{
+    LEFT,
+    ADDITIVE,
+    MULTIPLICATIVE,
+    EXPONENTIAL,
+    UNARYMATHFUNCTION,
+    RIGHT
+};
 
 
 int getPrecedence(const Operation& op) {
@@ -22,17 +45,45 @@ struct UnaryMapping {
 };
 
 const std::vector<UnaryMapping> UnaryFunctions = {
-    {"sin", SIN},
-    {"cos",  COS},
-    {"tan",  TAN},
     {"asin", ASIN},
     {"acos", ACOS},
     {"atan", ATAN},
+    {"sin", SIN},
+    {"cos",  COS},
+    {"tan",  TAN},
     {"log", LOG10},
-    {"ln", LN}
+    {"ln", LN},
+    {"abs", ABS},
+    {"sqrt", SQRT}
+};
+const std::unordered_map<char, std::string> getFuncBack ={
+    {SIN,"sin"},
+    {COS,"cos"},
+    {TAN,"tan"},
+    {ASIN,"asin"},
+    {ACOS,"acos"},
+    {ATAN,"atan"},
+    {LOG10,"log"},
+    {LN,"ln"},
+    {ABS,"abs"},
+    {SQRT, "sqrt"},
+    {'+', "+"},
+    {'-', "-"},
+    {'*', "*"},
+    {'/', "/"},
+    {'%', "%"},
+    {'^', "^"},
+    {'(', "("},
+    {')', ")"}
+
+};
+const std::unordered_map<std::string, double> constants ={
+    {"e",  2.718281828459045},
+    {"pi", 3.141592653589793}
 };
 const std::unordered_map<char, Operation> operationMap = {
     {'+', BinaryOperation{'+', add,   ADDITIVE}},
+    {'-', BinaryOperation{'-', sub, ADDITIVE}},
     {'*', BinaryOperation{'*', mult,  MULTIPLICATIVE}},
     {'/', BinaryOperation{'/', div, MULTIPLICATIVE}}, 
     {'%', BinaryOperation{'%', mod,   MULTIPLICATIVE}},
@@ -46,7 +97,9 @@ const std::unordered_map<char, Operation> operationMap = {
     {ACOS, UnaryOperation{ACOS, std::acos, UNARYMATHFUNCTION}},
     {ATAN, UnaryOperation{ATAN, std::atan, UNARYMATHFUNCTION}},
     {LOG10, UnaryOperation{LOG10,std::log10, UNARYMATHFUNCTION}},
-    {LN, UnaryOperation{LN, std::log, UNARYMATHFUNCTION}}
+    {LN, UnaryOperation{LN, std::log, UNARYMATHFUNCTION}},
+    {ABS, UnaryOperation{ABS,std::abs, UNARYMATHFUNCTION}},
+    {SQRT, UnaryOperation{SQRT,std::sqrt, UNARYMATHFUNCTION}}
 };
 void replaceAll(std::string& str, const std::string& from, const std::string& to) {
     if (from.empty()) return;
@@ -87,6 +140,9 @@ std::string fixup(std::string& expression){
     for (const auto& Unary : UnaryFunctions) {
         replaceAll(expression, Unary.name, std::string(1, Unary.code));
     }
+    for(const auto&[constant, value] : constants){
+        replaceAll(expression,constant,std::to_string(value));
+    }
     if (expression.length() <= 1) {
         return expression;
     }
@@ -95,7 +151,7 @@ std::string fixup(std::string& expression){
     for(int i = 1; i < expression.length(); i++){
         char working = expression.at(i);
 
-        if(working == '('){
+        if(working == '(' || working < ENDUNARY){
             if(std::isalnum(expression.at(i -1))){
                 ret += '*';
                 
@@ -108,6 +164,11 @@ std::string fixup(std::string& expression){
                 }
                 
             }
+            /*I don't care if a / -(some shit) becomes a / (-1) * (some shit) = (-a) / (some shit)
+            the basic division symbol and, by proxy, "/" are kind of ambigous and stupid. 
+            If this causes confusion then blame division.  
+            Oh and I guess this affects modulo (%). Womp womp.
+            */
             ret += working;
         }else if(working == ')'){
             //gotta walk forwards
@@ -161,7 +222,7 @@ void checkStack(std::vector<Token>& tokens, std::stack<Operation>& stack, Operat
         return;
     }
 
-    if(getPrecedence(o) < getPrecedence(stack.top())){
+    if(getPrecedence(o) <= getPrecedence(stack.top())){
         while(!stack.empty()){
             if(getPrecedence(o) > getPrecedence(stack.top())){
                 break;
@@ -185,6 +246,7 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
             if(!(std::isdigit(expression.at(offset) | (expression.at(offset) != '.')))){
                 break;
             }
+            
         }
         tokens.push_back(std::stod(expression.substr(0,offset)));
    
@@ -198,9 +260,10 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
 
     while(i < expression.length()){
         char working = expression.at(i);
-
+        //std::cout << working;
         if(working == '-'){
-            if(!std::isalnum(expression.at(i -1))){
+            if((!std::isalnum(expression.at(i -1))) & (expression.at(i-1) != ')')){
+                
                 int j = i + 1;
                 for(;j < expression.length(); j++){
                     if(!std::isdigit(expression.at(j)) & (expression.at(j) != '.')){
@@ -215,6 +278,7 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
             }else{
                 //subtract!
                 checkStack(tokens,stack, BinaryOperation{'-', sub,ADDITIVE});
+                
                 
             }
         }else if(std::isalpha(working)){ //assumbed variable! (1 CHAR)
@@ -257,12 +321,12 @@ void getPostFix(std::string& expression, std::vector<Token>& tokens){
 
 
 double evaluatePostFix(const std::vector<Token>& tokens){
-    std::stack<double> nums;
+    std::stack<double,std::vector<double>> nums;
     for(int i = 0; i < tokens.size(); i++){
-        if(std::holds_alternative<double>(tokens.at(i))){
-            nums.push(std::get<double>(tokens.at(i)));
-        }else if(std::holds_alternative<Operation>(tokens.at(i))){
-            Operation o = std::get<Operation>(tokens.at(i));
+        if(std::holds_alternative<double>(tokens[i])){
+            nums.push(std::get<double>(tokens[i]));
+        }else if(std::holds_alternative<Operation>(tokens[i])){
+            Operation o = std::get<Operation>(tokens[i]);
             if(std::holds_alternative<BinaryOperation>(o)){
                 BinaryOperation binary = std::get<BinaryOperation>(o);
                 double p1 = nums.top(); nums.pop();
@@ -285,12 +349,12 @@ double evaluatePostFix(const std::vector<Token>& tokens){
     return nums.top();
 }
 double evaluatePostFix(const std::vector<Token>& tokens, const std::unordered_map<char, double>& variables){
-        std::stack<double> nums;
+    std::stack<double,std::vector<double>> nums;
     for(int i = 0; i < tokens.size(); i++){
-        if(std::holds_alternative<double>(tokens.at(i))){
-            nums.push(std::get<double>(tokens.at(i)));
-        }else if(std::holds_alternative<Operation>(tokens.at(i))){
-            Operation o = std::get<Operation>(tokens.at(i));
+        if(std::holds_alternative<double>(tokens[i])){
+            nums.push(std::get<double>(tokens[i]));
+        }else if(std::holds_alternative<Operation>(tokens[i])){
+            Operation o = std::get<Operation>(tokens[i]);
             if(std::holds_alternative<BinaryOperation>(o)){
                 BinaryOperation binary = std::get<BinaryOperation>(o);
                 double p1 = nums.top(); nums.pop();
@@ -306,8 +370,8 @@ double evaluatePostFix(const std::vector<Token>& tokens, const std::unordered_ma
 
             }
   
-        }else if(std::holds_alternative<Variable>(tokens.at(i))){
-            auto boundValue = variables.find(std::get<Variable>(tokens.at(i)).name);
+        }else if(std::holds_alternative<Variable>(tokens[i])){
+            auto boundValue = variables.find(std::get<Variable>(tokens[i]).name);
             if(boundValue == variables.end()){
                 throw std::invalid_argument("Unknown variable in expression");
             }
@@ -322,4 +386,38 @@ double evaluate(std::string& expression){
     std::vector<Token> tokens;
     getPostFix(expression, tokens);
     return evaluatePostFix(tokens);
+}
+std::string getPostFixString(const std::vector<Token>& tokens){
+    std::string output ="";
+    for(int i = 0;  i < tokens.size(); i++){
+        if(std::holds_alternative<double>(tokens[i])){
+            
+            output += std::to_string(std::get<double>(tokens[i]));
+        }else if(std::holds_alternative<Operation>(tokens[i])){
+            Operation o = std::get<Operation>(tokens[i]);
+            if(std::holds_alternative<BinaryOperation>(o)){
+                
+                BinaryOperation binary = std::get<BinaryOperation>(o);
+                output += getFuncBack.find(binary.symbol)->second;
+            }else if (std::holds_alternative<UnaryOperation>(o)){
+                UnaryOperation unary = std::get<UnaryOperation>(o);
+                output += getFuncBack.find(unary.symbol)->second;
+
+
+            }
+  
+        }else if(std::holds_alternative<Variable>(tokens[i])){
+            Variable var = std::get<Variable>(tokens[i]);
+            output += var.name;
+        
+        }
+        output += " ";
+
+
+
+
+    }
+    return output;
+
+
 }

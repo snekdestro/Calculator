@@ -18,25 +18,7 @@ double mod(double a, double b);
 double power(double a, double b);
 double dummy(double a, double b);
 
-enum FunctionChar{
-    SIN = '\x01',
-    COS = '\x02',
-    TAN = '\x03',
-    ASIN = '\x04',
-    ACOS = '\x05',
-    ATAN = '\x06',
-    LOG10 = '\x07',
-    LN = '\x08'
-};
 
-enum Priorities{
-    LEFT,
-    ADDITIVE,
-    MULTIPLICATIVE,
-    EXPONENTIAL,
-    UNARYMATHFUNCTION,
-    RIGHT
-};
 
 struct BinaryOperation{
     char symbol;
@@ -62,7 +44,7 @@ std::string fixup(std::string& expression);
 void getPostFix(std::string& expression, std::vector<Token>& tokens);
 double evaluatePostFix(const std::vector<Token>& tokens);
 double evaluatePostFix(const std::vector<Token>& tokens, const std::unordered_map<char, double>& variables);
-
+std::string getPostFixString(const std::vector<Token>& tokens);
 
 
 
